@@ -1,0 +1,3 @@
+# Ignore local Claude state but keep the checked-in skill snapshot
+.claude/*
+!.claude/skills/

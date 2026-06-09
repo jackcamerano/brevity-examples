@@ -8,6 +8,10 @@ A small corpus for demonstrating the `brevity` skill on a range of documents.
 - The **`brevity-pass`** branch holds the same documents after each was run through the `brevity` skill, one commit per document.
 - Open `brevity-pass` as a pull request against `main`. The diff is the comparison.
 
+## Reproducing
+
+The exact `brevity` skill used for the `brevity-pass` is checked in at `.claude/skills/brevity/`. Open this repo in Claude Code and run the skill on any document to reproduce the pass.
+
 ## Documents
 
 | File                                       | Source                                     |

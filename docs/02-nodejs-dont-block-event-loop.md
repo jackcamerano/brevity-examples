@@ -2,26 +2,26 @@
 
 ## Should you read this guide?
 
-If you're writing anything more complicated than a brief command-line script, reading this should help you write higher-performance, more-secure applications.
+If you're writing anything more than a brief command-line script, this should help you write faster, more-secure applications.
 
-This document is written with Node.js servers in mind, but the concepts apply to complex Node.js applications as well. Where OS-specific details vary, this document is Linux-centric.
+This targets Node.js servers, but the concepts apply to complex Node.js applications too. Where OS details vary, it is Linux-centric.
 
 ## Summary
 
-Node.js runs JavaScript code in the Event Loop (initialization and callbacks), and offers a Worker Pool to handle expensive tasks like file I/O. Node.js scales well, sometimes better than more heavyweight approaches like Apache. The secret to the scalability of Node.js is that it uses a small number of threads to handle many clients. If Node.js can make do with fewer threads, then it can spend more of your system's time and memory working on clients rather than on paying space and time overheads for threads (memory, context-switching). But because Node.js has only a few threads, you must structure your application to use them wisely.
+Node.js runs JavaScript in the Event Loop (initialization and callbacks), and offers a Worker Pool for expensive tasks like file I/O. It scales well, sometimes better than heavyweight approaches like Apache. The secret: it uses few threads to handle many clients, spending your system's time and memory on clients rather than per-thread overheads (memory, context-switching). But with few threads, you must structure your application to use them wisely.
 
-Here's a good rule of thumb for keeping your Node.js server speedy: _Node.js is fast when the work associated with each client at any given time is "small"_.
+A good rule of thumb for a speedy server: _Node.js is fast when the work associated with each client at any given time is "small"_.
 
 This applies to callbacks on the Event Loop and tasks on the Worker Pool.
 
 ## Why should I avoid blocking the Event Loop and the Worker Pool?
 
-Node.js uses a small number of threads to handle many clients. In Node.js there are two types of threads: one Event Loop (aka the main loop, main thread, event thread, etc.), and a pool of `k` Workers in a Worker Pool (aka the threadpool).
+Node.js uses few threads to handle many clients. Two types: one Event Loop (aka the main loop, main thread, event thread), and a pool of `k` Workers in a Worker Pool (aka the threadpool).
 
-If a thread is taking a long time to execute a callback (Event Loop) or a task (Worker), we call it "blocked". While a thread is blocked working on behalf of one client, it cannot handle requests from any other clients. This provides two motivations for blocking neither the Event Loop nor the Worker Pool:
+If a thread takes a long time to execute a callback (Event Loop) or a task (Worker), we call it "blocked". While blocked working for one client, it cannot handle any other clients. Two reasons not to block either:
 
-1. Performance: If you regularly perform heavyweight activity on either type of thread, the _throughput_ (requests/second) of your server will suffer.
-2. Security: If it is possible that for certain input one of your threads might block, a malicious client could submit this "evil input", make your threads block, and keep them from working on other clients. This would be a Denial of Service attack.
+1. Performance: regular heavyweight activity on either thread hurts your server's _throughput_ (requests/second).
+2. Security: if certain input can block a thread, a malicious client could submit this "evil input" to block your threads and starve other clients: a Denial of Service attack.
 
 ## A quick review of Node
 
@@ -29,19 +29,17 @@ Node.js uses the Event-Driven Architecture: it has an Event Loop for orchestrati
 
 ### What code runs on the Event Loop?
 
-When they begin, Node.js applications first complete an initialization phase, `require`'ing modules and registering callbacks for events. Node.js applications then enter the Event Loop, responding to incoming client requests by executing the appropriate callback. This callback executes synchronously, and may register asynchronous requests to continue processing after it completes. The callbacks for these asynchronous requests will also be executed on the Event Loop.
+Node.js applications first run an initialization phase, `require`'ing modules and registering event callbacks. They then enter the Event Loop, responding to client requests by executing the appropriate callback. The callback executes synchronously, and may register asynchronous requests that continue after it completes. Those requests' callbacks also execute on the Event Loop.
 
-The Event Loop will also fulfill the non-blocking asynchronous requests made by its callbacks, e.g., network I/O.
-
-In summary, the Event Loop executes the JavaScript callbacks registered for events, and is also responsible for fulfilling non-blocking asynchronous requests like network I/O.
+The Event Loop also fulfills the non-blocking asynchronous requests made by its callbacks, e.g., network I/O.
 
 ### What code runs on the Worker Pool?
 
-The Worker Pool of Node.js is implemented in libuv, which exposes a general task submission API.
+Node.js's Worker Pool is implemented in libuv, which exposes a general task submission API.
 
-Node.js uses the Worker Pool to handle "expensive" tasks. This includes I/O for which an operating system does not provide a non-blocking version, as well as particularly CPU-intensive tasks.
+Node.js uses the Worker Pool for "expensive" tasks: I/O for which the operating system provides no non-blocking version, and particularly CPU-intensive tasks.
 
-These are the Node.js module APIs that make use of this Worker Pool:
+The Node.js module APIs that use the Worker Pool:
 
 1. I/O-intensive
    1. DNS: `dns.lookup()`, `dns.lookupService()`.
@@ -50,33 +48,33 @@ These are the Node.js module APIs that make use of this Worker Pool:
    1. Crypto: `crypto.pbkdf2()`, `crypto.scrypt()`, `crypto.randomBytes()`, `crypto.randomFill()`, `crypto.generateKeyPair()`.
    2. Zlib: All zlib APIs except those that are explicitly synchronous use libuv's threadpool.
 
-In many Node.js applications, these APIs are the only sources of tasks for the Worker Pool. Applications and modules that use a C++ add-on can submit other tasks to the Worker Pool.
+In many applications these APIs are the only sources of Worker Pool tasks. Applications and modules using a C++ add-on can submit other tasks.
 
-For the sake of completeness, we note that when you call one of these APIs from a callback on the Event Loop, the Event Loop pays some minor setup costs as it enters the Node.js C++ bindings for that API and submits a task to the Worker Pool. These costs are negligible compared to the overall cost of the task, which is why the Event Loop is offloading it. When submitting one of these tasks to the Worker Pool, Node.js provides a pointer to the corresponding C++ function in the Node.js C++ bindings.
+When you call one of these APIs from an Event Loop callback, the Event Loop pays minor setup costs entering the Node.js C++ bindings and submitting a task to the Worker Pool. These are negligible compared to the task itself, which is why the Event Loop offloads it. Node.js passes a pointer to the corresponding C++ function in the bindings.
 
 ### How does Node.js decide what code to run next?
 
 Abstractly, the Event Loop and the Worker Pool maintain queues for pending events and pending tasks, respectively.
 
-In truth, the Event Loop does not actually maintain a queue. Instead, it has a collection of file descriptors that it asks the operating system to monitor, using a mechanism like epoll (Linux), kqueue (OSX), event ports (Solaris), or IOCP (Windows). These file descriptors correspond to network sockets, any files it is watching, and so on. When the operating system says that one of these file descriptors is ready, the Event Loop translates it to the appropriate event and invokes the callback(s) associated with that event.
+In truth, the Event Loop maintains no queue. Instead it asks the operating system to monitor a collection of file descriptors, using a mechanism like epoll (Linux), kqueue (OSX), event ports (Solaris), or IOCP (Windows). These descriptors correspond to network sockets, watched files, and so on. When the OS says a descriptor is ready, the Event Loop translates it to the appropriate event and invokes the associated callback(s).
 
-In contrast, the Worker Pool uses a real queue whose entries are tasks to be processed. A Worker pops a task from this queue and works on it, and when finished the Worker raises an "At least one task is finished" event for the Event Loop.
+In contrast, the Worker Pool uses a real queue of tasks. A Worker pops a task, works on it, and when finished raises an "At least one task is finished" event for the Event Loop.
 
 ### What does this mean for application design?
 
-In a one-thread-per-client system like Apache, each pending client is assigned its own thread. If a thread handling one client blocks, the operating system will interrupt it and give another client a turn. The operating system thus ensures that clients that require a small amount of work are not penalized by clients that require more work.
+In a one-thread-per-client system like Apache, each pending client gets its own thread. If a thread handling one client blocks, the operating system interrupts it and gives another client a turn, ensuring clients that need little work aren't penalized by clients that need more.
 
-Because Node.js handles many clients with few threads, if a thread blocks handling one client's request, then pending client requests may not get a turn until the thread finishes its callback or task. _The fair treatment of clients is thus the responsibility of your application_. This means that you shouldn't do too much work for any client in any single callback or task.
+Because Node.js handles many clients with few threads, if a thread blocks on one client's request, pending requests may not get a turn until it finishes its callback or task. _The fair treatment of clients is thus the responsibility of your application_: don't do too much work for any client in a single callback or task.
 
-This is part of why Node.js can scale well, but it also means that you are responsible for ensuring fair scheduling. The next sections talk about how to ensure fair scheduling for the Event Loop and for the Worker Pool.
+This is part of why Node.js can scale well, but it also makes you responsible for fair scheduling. The next sections cover fair scheduling for the Event Loop and the Worker Pool.
 
 ## Don't block the Event Loop
 
-The Event Loop notices each new client connection and orchestrates the generation of a response. All incoming requests and outgoing responses pass through the Event Loop. This means that if the Event Loop spends too long at any point, all current and new clients will not get a turn.
+The Event Loop notices each new client connection and orchestrates the response. All requests and responses pass through it. So if it spends too long at any point, all current and new clients will not get a turn.
 
-You should make sure you never block the Event Loop. In other words, each of your JavaScript callbacks should complete quickly. This of course also applies to your `await`'s, your `Promise.then`'s, and so on.
+Never block the Event Loop: each JavaScript callback should complete quickly. This also applies to your `await`'s, `Promise.then`'s, and so on.
 
-A good way to ensure this is to reason about the "computational complexity" of your callbacks. If your callback takes a constant number of steps no matter what its arguments are, then you'll always give every pending client a fair turn. If your callback takes a different number of steps depending on its arguments, then you should think about how long the arguments might be.
+Reason about the "computational complexity" of your callbacks. If a callback takes a constant number of steps regardless of its arguments, every pending client gets a fair turn. If the step count varies with the arguments, think about how long the arguments might be.
 
 Example 1: A constant-time callback.
 
@@ -86,7 +84,7 @@ app.get("/constant-time", (req, res) => {
 });
 ```
 
-Example 2: An `O(n)` callback. This callback will run quickly for small `n` and more slowly for large `n`.
+Example 2: An `O(n)` callback. Quick for small `n`, slower for large `n`.
 
 ```js
 app.get("/countToN", (req, res) => {
@@ -101,7 +99,7 @@ app.get("/countToN", (req, res) => {
 });
 ```
 
-Example 3: An `O(n^2)` callback. This callback will still run quickly for small `n`, but for large `n` it will run much more slowly than the previous `O(n)` example.
+Example 3: An `O(n^2)` callback. Still quick for small `n`, but for large `n` much slower than the previous `O(n)` example.
 
 ```js
 app.get("/countToN2", (req, res) => {
@@ -120,9 +118,9 @@ app.get("/countToN2", (req, res) => {
 
 ### How careful should you be?
 
-Node.js uses the Google V8 engine for JavaScript, which is quite fast for many common operations. Exceptions to this rule are regexps and JSON operations, discussed below.
+Node.js uses the Google V8 engine, which is quite fast for many common operations. Exceptions are regexps and JSON operations, discussed below.
 
-However, for complex tasks you should consider bounding the input and rejecting inputs that are too long. That way, even if your callback has large complexity, by bounding the input you ensure the callback cannot take more than the worst-case time on the longest acceptable input. You can then evaluate the worst-case cost of this callback and determine whether its running time is acceptable in your context.
+For complex tasks, consider bounding the input and rejecting inputs that are too long. Then, even with large complexity, the callback cannot exceed the worst-case time on the longest acceptable input. You can evaluate that cost and decide whether it's acceptable in your context.
 
 ### Blocking the Event Loop: REDOS
 
@@ -130,9 +128,9 @@ One common way to block the Event Loop disastrously is by using a "vulnerable" r
 
 #### Avoiding vulnerable regular expressions
 
-A regular expression (regexp) matches an input string against a pattern. We usually think of a regexp match as requiring a single pass through the input string --- `O(n)` time where `n` is the length of the input string. In many cases, a single pass is indeed all it takes. Unfortunately, in some cases the regexp match might require an exponential number of trips through the input string --- `O(2^n)` time. An exponential number of trips means that if the engine requires `x` trips to determine a match, it will need `2*x` trips if we add only one more character to the input string. Since the number of trips is linearly related to the time required, the effect of this evaluation will be to block the Event Loop.
+A regular expression (regexp) matches an input string against a pattern. We usually think of a match as a single pass through the input --- `O(n)` time, where `n` is the input length. Often a single pass is all it takes. But some matches require an exponential number of trips through the input --- `O(2^n)` time: if the engine needs `x` trips to determine a match, it needs `2*x` after one more character is added. Since trips relate linearly to time, this blocks the Event Loop.
 
-A _vulnerable regular expression_ is one on which your regular expression engine might take exponential time, exposing you to REDOS on "evil input". Whether or not your regular expression pattern is vulnerable (i.e. the regexp engine might take exponential time on it) is actually a difficult question to answer, and varies depending on whether you're using Perl, Python, Ruby, Java, JavaScript, etc., but here are some rules of thumb that apply across all of these languages:
+A _vulnerable regular expression_ is one on which your engine might take exponential time, exposing you to REDOS on "evil input". Whether a pattern is vulnerable (i.e. the engine might take exponential time on it) is actually a difficult question to answer, and varies depending on whether you're using Perl, Python, Ruby, Java, JavaScript, etc., but here are some rules of thumb that apply across all of these languages:
 
 1. Avoid nested quantifiers like `(a+)*`. V8's regexp engine can handle some of these quickly, but others are vulnerable.
 2. Avoid OR's with overlapping clauses, like `(a|a)*`. Again, these are sometimes-fast.
@@ -143,7 +141,7 @@ If you aren't sure whether your regular expression is vulnerable, remember that 
 
 #### A REDOS example
 
-Here is an example vulnerable regexp exposing its server to REDOS:
+An example vulnerable regexp exposing its server to REDOS:
 
 ```js
 app.get("/redos-me", (req, res) => {
@@ -160,24 +158,24 @@ app.get("/redos-me", (req, res) => {
 });
 ```
 
-The vulnerable regexp in this example is a (bad!) way to check for a valid path on Linux. It matches strings that are a sequence of "/"-delimited names, like "/a/b/c". It is dangerous because it violates rule 1: it has a doubly-nested quantifier.
+This regexp is a (bad!) way to check for a valid path on Linux. It matches strings that are a sequence of "/"-delimited names, like "/a/b/c". It is dangerous because it violates rule 1: it has a doubly-nested quantifier.
 
 If a client queries with filePath `///.../\n` (100 /'s followed by a newline character that the regexp's "." won't match), then the Event Loop will take effectively forever, blocking the Event Loop. This client's REDOS attack causes all other clients not to get a turn until the regexp match finishes.
 
-For this reason, you should be leery of using complex regular expressions to validate user input.
+So be leery of using complex regular expressions to validate user input.
 
 #### Anti-REDOS Resources
 
-There are some tools to check your regexps for safety, like
+Some tools check your regexps for safety:
 
 - safe-regex
 - rxxr2.
 
 However, neither of these will catch all vulnerable regexps.
 
-Another approach is to use a different regexp engine. You could use the node-re2 module, which uses Google's blazing-fast RE2 regexp engine. But be warned, RE2 is not 100% compatible with V8's regexps, so check for regressions if you swap in the node-re2 module to handle your regexps. And particularly complicated regexps are not supported by node-re2.
+Another approach is a different regexp engine. The node-re2 module uses Google's blazing-fast RE2 regexp engine. But be warned: RE2 is not 100% compatible with V8's regexps, so check for regressions if you swap it in, and node-re2 doesn't support particularly complicated regexps.
 
-If you're trying to match something "obvious", like a URL or a file path, find an example in a regexp library or use an npm module, e.g. ip-regex.
+To match something "obvious" like a URL or a file path, find an example in a regexp library or use an npm module, e.g. ip-regex.
 
 ### Blocking the Event Loop: Node.js core modules
 
@@ -188,7 +186,7 @@ Several Node.js core modules have synchronous expensive APIs, including:
 - File system
 - Child process
 
-These APIs are expensive, because they involve significant computation (encryption, compression), require I/O (file I/O), or potentially both (child process). These APIs are intended for scripting convenience, but are not intended for use in the server context. If you execute them on the Event Loop, they will take far longer to complete than a typical JavaScript instruction, blocking the Event Loop.
+These are expensive because they involve significant computation (encryption, compression), require I/O (file I/O), or potentially both (child process). They are intended for scripting convenience, not for use in the server context. On the Event Loop they take far longer to complete than a typical JavaScript instruction, blocking the Event Loop.
 
 In a server, _you should not use the following synchronous APIs from these modules_:
 
@@ -211,11 +209,11 @@ This list is reasonably complete as of Node.js v9.
 
 ### Blocking the Event Loop: JSON DOS
 
-`JSON.parse` and `JSON.stringify` are other potentially expensive operations. While these are `O(n)` in the length of the input, for large `n` they can take surprisingly long.
+`JSON.parse` and `JSON.stringify` are also potentially expensive. Though `O(n)` in input length, for large `n` they can take surprisingly long.
 
-If your server manipulates JSON objects, particularly those from a client, you should be cautious about the size of the objects or strings you work with on the Event Loop.
+If your server manipulates JSON objects, particularly those from a client, be cautious about the size of the objects or strings you work with on the Event Loop.
 
-Example: JSON blocking. We create an object `obj` of size 2^21 and `JSON.stringify` it, run `indexOf` on the string, and then JSON.parse it. The `JSON.stringify`'d string is 50MB. It takes 0.7 seconds to stringify the object, 0.03 seconds to indexOf on the 50MB string, and 1.3 seconds to parse the string.
+Example: JSON blocking. We create an object `obj` of size 2^21, `JSON.stringify` it, run `indexOf` on the string, then `JSON.parse` it. The `JSON.stringify`'d string is 50MB. It takes 0.7 seconds to stringify, 0.03 seconds to indexOf on the 50MB string, and 1.3 seconds to parse.
 
 ```js
 let obj = { a: 1 };
@@ -245,20 +243,20 @@ duration = process.hrtime(start);
 console.log("JSON.parse took", duration);
 ```
 
-There are npm modules that offer asynchronous JSON APIs. See for example:
+Some npm modules offer asynchronous JSON APIs:
 
 - JSONStream, which has stream APIs.
 - Big-Friendly JSON, which has stream APIs as well as asynchronous versions of the standard JSON APIs using the partitioning-on-the-Event-Loop paradigm outlined below.
 
 ## Complex calculations without blocking the Event Loop
 
-Suppose you want to do complex calculations in JavaScript without blocking the Event Loop. You have two options: partitioning or offloading.
+Suppose you want complex calculations in JavaScript without blocking the Event Loop. Two options: partitioning or offloading.
 
 ### Partitioning
 
-You could _partition_ your calculations so that each runs on the Event Loop but regularly yields (gives turns to) other pending events. In JavaScript it's easy to save the state of an ongoing task in a closure, as shown in example 2 below.
+_Partition_ your calculations so each runs on the Event Loop but regularly yields (gives turns) to other pending events. In JavaScript it's easy to save an ongoing task's state in a closure, as shown in example 2 below.
 
-For a simple example, suppose you want to compute the average of the numbers `1` to `n`.
+For example, suppose you want the average of the numbers `1` to `n`.
 
 Example 1: Un-partitioned average, costs `O(n)`
 
@@ -305,37 +303,37 @@ You can apply this principle to array iterations and so forth.
 
 ### Offloading
 
-If you need to do something more complex, partitioning is not a good option. This is because partitioning uses only the Event Loop, and you won't benefit from multiple cores almost certainly available on your machine. _Remember, the Event Loop should orchestrate client requests, not fulfill them itself._ For a complicated task, move the work off of the Event Loop onto a Worker Pool.
+For something more complex, partitioning is a poor option: it uses only the Event Loop, so you won't benefit from the multiple cores almost certainly on your machine. _Remember, the Event Loop should orchestrate client requests, not fulfill them itself._ For a complicated task, move the work off the Event Loop onto a Worker Pool.
 
 #### How to offload
 
-You have two options for a destination Worker Pool to which to offload work.
+Two destination Worker Pools to offload to:
 
-1. You can use the built-in Node.js Worker Pool by developing a C++ addon. On older versions of Node, build your C++ addon using NAN, and on newer versions use N-API. node-webworker-threads offers a JavaScript-only way to access the Node.js Worker Pool.
-2. You can create and manage your own Worker Pool dedicated to computation rather than the Node.js I/O-themed Worker Pool. The most straightforward ways to do this is using Child Process or Cluster.
+1. The built-in Node.js Worker Pool, via a C++ addon. On older Node versions build it with NAN, on newer ones with N-API. node-webworker-threads offers a JavaScript-only way to access the Node.js Worker Pool.
+2. Your own Worker Pool dedicated to computation, rather than the Node.js I/O-themed one. The most straightforward ways are Child Process or Cluster.
 
-You should _not_ simply create a Child Process for every client. You can receive client requests more quickly than you can create and manage children, and your server might become a fork bomb.
+Do _not_ simply create a Child Process for every client. You can receive client requests more quickly than you can create and manage children, and your server might become a fork bomb.
 
 #### Downside of offloading
 
-The downside of the offloading approach is that it incurs overhead in the form of _communication costs_. Only the Event Loop is allowed to see the "namespace" (JavaScript state) of your application. From a Worker, you cannot manipulate a JavaScript object in the Event Loop's namespace. Instead, you have to serialize and deserialize any objects you wish to share. Then the Worker can operate on its own copy of these object(s) and return the modified object (or a "patch") to the Event Loop.
+Offloading incurs overhead in the form of _communication costs_. Only the Event Loop can see your application's "namespace" (JavaScript state). From a Worker you cannot manipulate a JavaScript object in the Event Loop's namespace; instead you serialize and deserialize any objects you wish to share. The Worker then operates on its own copy and returns the modified object (or a "patch") to the Event Loop.
 
 For serialization concerns, see the section on JSON DOS.
 
 #### Some suggestions for offloading
 
-You may wish to distinguish between CPU-intensive and I/O-intensive tasks because they have markedly different characteristics.
+Distinguish between CPU-intensive and I/O-intensive tasks: they have markedly different characteristics.
 
-A CPU-intensive task only makes progress when its Worker is scheduled, and the Worker must be scheduled onto one of your machine's logical cores. If you have 4 logical cores and 5 Workers, one of these Workers cannot make progress. As a result, you are paying overhead (memory and scheduling costs) for this Worker and getting no return for it.
+A CPU-intensive task only makes progress when its Worker is scheduled onto one of your machine's logical cores. With 4 logical cores and 5 Workers, one Worker cannot make progress, so you pay overhead (memory and scheduling) for it with no return.
 
-I/O-intensive tasks involve querying an external service provider (DNS, file system, etc.) and waiting for its response. While a Worker with an I/O-intensive task is waiting for its response, it has nothing else to do and can be de-scheduled by the operating system, giving another Worker a chance to submit their request. Thus, _I/O-intensive tasks will be making progress even while the associated thread is not running_. External service providers like databases and file systems have been highly optimized to handle many pending requests concurrently. For example, a file system will examine a large set of pending write and read requests to merge conflicting updates and to retrieve files in an optimal order.
+I/O-intensive tasks query an external service provider (DNS, file system, etc.) and wait for its response. While waiting, a Worker has nothing to do and can be de-scheduled by the operating system, giving another Worker a chance to submit its request. Thus, _I/O-intensive tasks make progress even while the associated thread is not running_. External providers like databases and file systems are highly optimized to handle many pending requests concurrently: a file system, for example, examines pending reads and writes to merge conflicting updates and retrieve files in an optimal order.
 
-If you rely on only one Worker Pool, e.g. the Node.js Worker Pool, then the differing characteristics of CPU-bound and I/O-bound work may harm your application's performance.
+If you rely on only one Worker Pool, e.g. the Node.js one, the differing characteristics of CPU-bound and I/O-bound work may harm your performance.
 
-For this reason, you might wish to maintain a separate Computation Worker Pool.
+So you might maintain a separate Computation Worker Pool.
 
 #### Offloading: conclusions
 
-For simple tasks, like iterating over the elements of an arbitrarily long array, partitioning might be a good option. If your computation is more complex, offloading is a better approach: the communication costs, i.e. the overhead of passing serialized objects between the Event Loop and the Worker Pool, are offset by the benefit of using multiple cores.
+For simple tasks, like iterating over an arbitrarily long array, partitioning might be a good option. If your computation is more complex, offloading is better: the communication costs of passing serialized objects between the Event Loop and the Worker Pool are offset by the benefit of multiple cores.
 
-However, if your server relies heavily on complex calculations, you should think about whether Node.js is really a good fit. Node.js excels for I/O-bound work, but for expensive computation it might not be the best option.
+However, if your server relies heavily on complex calculations, consider whether Node.js is really a good fit. It excels for I/O-bound work, but for expensive computation it might not be the best option.

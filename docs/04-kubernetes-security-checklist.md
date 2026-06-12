@@ -1,13 +1,13 @@
 # Kubernetes Security Checklist
 
-This checklist aims at providing a basic list of guidance with links to more comprehensive documentation on each topic. It does not claim to be exhaustive and is meant to evolve.
+This checklist provides basic guidance with links to fuller documentation on each topic. It is not exhaustive and is meant to evolve.
 
-On how to read and use this document:
+How to read this document:
 
-- The order of topics does not reflect an order of priority.
-- Some checklist items are detailed in the paragraph below the list of each section.
+- Topic order does not reflect priority.
+- Some items are detailed in the paragraph below each section's list.
 
-> **Caution:** Checklists are **not** sufficient for attaining a good security posture on their own. A good security posture requires constant attention and improvement, but a checklist can be the first step on the never-ending journey towards security preparedness. Some of the recommendations in this checklist may be too restrictive or too lax for your specific security needs. Since Kubernetes security is not "one size fits all", each category of checklist items should be evaluated on its merits.
+> **Caution:** Checklists are **not** sufficient for a good security posture on their own. Good security requires constant attention and improvement; a checklist is only the first step. Some recommendations here may be too restrictive or too lax for your specific security needs. Since Kubernetes security is not "one size fits all", each category should be evaluated on its merits.
 
 ## Authentication & Authorization
 
@@ -18,7 +18,7 @@ On how to read and use this document:
 - [ ] A process exists for periodic access review, and reviews occur no more than 24 months apart.
 - [ ] The Role Based Access Control Good Practices are followed for guidance related to authentication and authorization.
 
-After bootstrapping, neither users nor components should authenticate to the Kubernetes API as `system:masters`. Similarly, running all of kube-controller-manager as `system:masters` should be avoided. In fact, `system:masters` should only be used as a break-glass mechanism, as opposed to an admin user.
+After bootstrapping, neither users nor components should authenticate to the Kubernetes API as `system:masters`. Avoid running kube-controller-manager as `system:masters`. It should only be a break-glass mechanism, not an admin user.
 
 ## Network security
 
